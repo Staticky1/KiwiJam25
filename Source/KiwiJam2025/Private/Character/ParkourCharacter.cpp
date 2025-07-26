@@ -9,6 +9,9 @@
 #include "EnhancedInputSubsystems.h"
 #include "InputActionValue.h"
 #include "Engine/LocalPlayer.h"
+#include "Blueprint/UserWidget.h"
+#include "UI/WorldMapWidget.h"
+#include "GameFramework/PlayerController.h"
 
 DEFINE_LOG_CATEGORY(LogParkourCharacter);
 
@@ -26,10 +29,14 @@ AParkourCharacter::AParkourCharacter(const FObjectInitializer& ObjectInitializer
 	FirstPersonCameraComponent = CreateDefaultSubobject<UCameraComponent>(TEXT("FirstPersonCamera"));
 	FirstPersonCameraComponent->SetupAttachment(GetCapsuleComponent());
 	FirstPersonCameraComponent->SetRelativeLocation(FVector(-10.f, 0.f, 60.f)); // Position the camera
-	FirstPersonCameraComponent->bUsePawnControlRotation = true;
+	FirstPersonCameraComponent->bUsePawnControlRotation = false;
 
 	ClimbableDetectorComponent = CreateDefaultSubobject<UClimbableDetectorComponent>("ClimbableDetector");
 	ClimbableDetectorComponent->SetOwnerCharacter(this);
+	//ClimbableDetectorComponent->RegisterComponent();
+
+	bMapOpen = false;
+
 }
 
 // Called when the game starts or when spawned
@@ -70,7 +77,13 @@ void AParkourCharacter::BeginJump(const FInputActionValue& Value)
 	if (ClimbableDetectorComponent)
 	{
 		FClimbableSurfaceResult Result;
-		if (ClimbableDetectorComponent->DetectClimbableSurface(Result) && Result.SurfaceType == EClimbableSurfaceType::Ledge)
+		FClimbableSurfaceResult VaultResult;
+
+		if (ClimbableDetectorComponent->CheckVaultSurface(VaultResult) && VaultResult.SurfaceType == EClimbableSurfaceType::Vaultable)
+		{
+			Cast<UParkourMovementComponent>(GetCharacterMovement())->BeginVault(VaultResult);
+		}
+		else if (ClimbableDetectorComponent->DetectClimbableSurface(Result) && Result.SurfaceType == EClimbableSurfaceType::Ledge)
 		{
 			Cast<UParkourMovementComponent>(GetCharacterMovement())->BeginClimb(Result);
 		}
@@ -82,11 +95,49 @@ void AParkourCharacter::BeginJump(const FInputActionValue& Value)
 
 }
 
+void AParkourCharacter::SetCameraRotation()
+{
+	FirstPersonCameraComponent->SetWorldRotation(GetControlRotation() + AdditionalCameraRotation);
+	AdditionalCameraRotation = FRotator();
+}
+
+void AParkourCharacter::ToggleMap(const FInputActionValue& Value)
+{
+	APlayerController* PC = Cast<APlayerController>(GetController()); 
+	if (!PC || !WorldMapWidgetClass) return; 
+
+	if (!bMapOpen)
+	{
+		// Create and display map
+		if (!WorldMapWidget) 
+		{
+			WorldMapWidget = CreateWidget<UWorldMapWidget>(PC, WorldMapWidgetClass); 
+			if (!WorldMapWidget) return;
+
+			// Example: Set world bounds before showing
+			FBox MapBounds(FVector(-2000, -2000, 0), FVector(2000, 2000, 0));
+			WorldMapWidget->SetWorldBounds(MapBounds);  
+		}
+
+		WorldMapWidget->AddToViewport();
+		bMapOpen = true;
+	}
+	else
+	{
+		if (WorldMapWidget)
+		{
+			WorldMapWidget->RemoveFromParent();
+		}
+		bMapOpen = false;
+	}
+}
+
 // Called every frame
 void AParkourCharacter::Tick(float DeltaTime)
 {
 	Super::Tick(DeltaTime);
 
+	SetCameraRotation();
 }
 
 void AParkourCharacter::NotifyControllerChanged()
@@ -119,10 +170,23 @@ void AParkourCharacter::SetupPlayerInputComponent(UInputComponent* PlayerInputCo
 
 		// Looking
 		EnhancedInputComponent->BindAction(LookAction, ETriggerEvent::Triggered, this, &AParkourCharacter::Look);
+
+		//Map
+		EnhancedInputComponent->BindAction(MapAction, ETriggerEvent::Triggered, this, &AParkourCharacter::ToggleMap);
 	}
 	else
 	{
 		UE_LOG(LogParkourCharacter, Error, TEXT("'%s' Failed to find an Enhanced Input Component!"), *GetNameSafe(this));
 	}
+}
+
+void AParkourCharacter::AddCameraRotation(FRotator Rotation)
+{
+	AdditionalCameraRotation += Rotation;
+}
+
+UWorldMapWidget* AParkourCharacter::GetWorldMapWidget()
+{
+	return WorldMapWidget;
 }
 

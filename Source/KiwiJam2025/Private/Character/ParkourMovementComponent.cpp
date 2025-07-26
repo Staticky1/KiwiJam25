@@ -5,10 +5,44 @@
 #include "Character/ClimbableDetectorComponent.h"
 #include "GameFramework/Character.h" 
 #include "Components/CapsuleComponent.h"
+#include "Curves/CurveVector.h"
+#include "Camera/CameraComponent.h"
+#include "Character/ParkourCharacter.h"
 
 UParkourMovementComponent::UParkourMovementComponent()
 {
+    PrimaryComponentTick.bCanEverTick = true;
+}
 
+void UParkourMovementComponent::TickComponent(float DeltaTime, ELevelTick TickType, FActorComponentTickFunction* ThisTickFunction)
+{
+    Super::TickComponent(DeltaTime, TickType, ThisTickFunction);
+
+    if (bShouldApplyPostVaultVelocity && MovementMode == MOVE_Walking)
+    {
+        Launch(PendingPostVaultVelocity);
+        bShouldApplyPostVaultVelocity = false;
+    }
+
+    if (VaultCameraTiltCurve && bVaulting) 
+    {
+        float Alpha = FMath::Clamp(VaultElapsed / VaultTime, 0.f, 1.f);
+        float CurveValue = VaultCameraTiltCurve->GetFloatValue(Alpha);
+        CurrentVaultTilt = CurveValue * MaxCameraTilt;
+    }
+    else
+    {
+        CurrentVaultTilt = FMath::FInterpTo(CurrentVaultTilt, 0.f, DeltaTime, 6.f); // Smooth reset
+    }
+
+    if (AParkourCharacter* Character = Cast<AParkourCharacter>(GetOwner()))  
+    {
+        FRotator TiltedRotation{};
+        TiltedRotation.Roll += CurrentVaultTilt;  
+        
+
+        Character->AddCameraRotation(TiltedRotation); 
+    }
 }
 
 void UParkourMovementComponent::PhysCustom(float deltaTime, int32 Iterations)
@@ -62,6 +96,24 @@ void UParkourMovementComponent::BeginClimb(const FClimbableSurfaceResult& Surfac
 
 }
 
+void UParkourMovementComponent::BeginVault(const FClimbableSurfaceResult& Surface)
+{
+    if (!VaultCurve || !CharacterOwner) return;
+
+    VaultStart = CharacterOwner->GetActorLocation();
+    VaultTarget = Surface.ImpactPoint + (Surface.ImpactNormal * 100.f);
+    VaultHeight = Surface.SurfaceHeight;
+    // Direction for vault curve X axis
+    VaultDirection = Surface.SurfaceForward;
+
+    VaultMomentumVelocity = Velocity;
+
+    VaultElapsed = 0.f;
+    bVaulting = true;
+
+    SetMovementMode(MOVE_Custom, MOVE_Vault); // 1 = Vault
+}
+
 void UParkourMovementComponent::PhysClimb(float deltaTime, int32 Iterations)
 {
     if (!bClimbActive || !CharacterOwner) return;
@@ -99,9 +151,30 @@ void UParkourMovementComponent::PhysClimb(float deltaTime, int32 Iterations)
             FRotator Current = Controller->GetControlRotation();
             FRotator Smoothed = FMath::RInterpTo(Current, DesiredClimbFacingRotation, deltaTime, 8.f);
             Controller->SetControlRotation(Smoothed);
+
+            FRotator DesiredRotation = Current;
+            DesiredRotation.Pitch = ClimbTargetPitch;
+            FRotator NewPitch = FMath::RInterpTo(Current, DesiredRotation, deltaTime, 6.f);
+            Current = NewPitch;
+
+            Controller->SetControlRotation(Current);
         }
     
 
+    }
+
+    if (ClimbPhase == EClimbPhase::Grab)
+    {
+        if (AController* Controller = CharacterOwner->GetController())
+        {
+            FRotator Current = Controller->GetControlRotation();
+            FRotator DesiredRotation = Current;
+            DesiredRotation.Pitch = -1.0f * (ClimbTargetPitch * 0.5f);
+            FRotator NewPitch = FMath::RInterpTo(Controller->GetControlRotation(), DesiredRotation, deltaTime, 4.f);
+            Current = NewPitch;
+
+            Controller->SetControlRotation(Current); 
+        }
     }
 
     if (CharacterOwner->GetCapsuleComponent())
@@ -113,18 +186,6 @@ void UParkourMovementComponent::PhysClimb(float deltaTime, int32 Iterations)
     float CurveAlpha = ClimbProgressCurve ? ClimbProgressCurve->GetFloatValue(Alpha) : Alpha;
     FVector NewLocation = FMath::Lerp(PhaseStart, PhaseEnd, CurveAlpha);
 
-    if (ClimbPhase == EClimbPhase::Grab)
-    {
-        // Interpolate camera pitch
-        if (AController* Controller = CharacterOwner->GetController())
-        {
-            FRotator ControlRot = Controller->GetControlRotation();
-            float NewPitch = FMath::Lerp(ClimbStartPitch, ClimbTargetPitch, CurveAlpha);
-            ControlRot.Pitch = NewPitch;
-
-            Controller->SetControlRotation(ControlRot);
-        }
-    }
 
     FVector DeltaMove = NewLocation - CharacterOwner->GetActorLocation();
     FHitResult Hit;
@@ -138,14 +199,6 @@ void UParkourMovementComponent::PhysClimb(float deltaTime, int32 Iterations)
         {
         case EClimbPhase::Approach:
             ClimbPhase = EClimbPhase::Grab;
-            if (AController* Controller = CharacterOwner->GetController())
-            {
-                FRotator CurrentRot = Controller->GetControlRotation();
-                ClimbStartPitch = CurrentRot.Pitch;
-
-                // Slight upward look — adjust to your taste
-                ClimbTargetPitch = -15.f;
-            }
             break;
         case EClimbPhase::Grab:
             ClimbPhase = EClimbPhase::PullUp;
@@ -172,4 +225,57 @@ void UParkourMovementComponent::PhysWallRun(float deltaTime, int32 Iterations)
 
 void UParkourMovementComponent::PhysVault(float deltaTime, int32 Iterations)
 {
+    if (!VaultCurve || !CharacterOwner || !bVaulting)
+    {
+        SetMovementMode(MOVE_Walking);
+        return;
+    }
+
+    VaultElapsed += deltaTime;
+    float Time = FMath::Clamp(VaultElapsed / VaultTime, 0.f, 1.f);;
+    if (CharacterOwner->GetCapsuleComponent())
+    {
+        CharacterOwner->GetCapsuleComponent()->SetCollisionEnabled(ECollisionEnabled::NoCollision);
+    }
+
+
+    if (Time >= 1.0f)
+    {
+        // End vault
+          // Estimate forward velocity from final curve direction
+        float CurveDelta = VaultForwardDistance;
+        FVector ForwardWorldDelta = VaultDirection * CurveDelta;
+
+        // Capture velocity to apply next frame
+        PendingPostVaultVelocity = ForwardWorldDelta + VaultMomentum + VaultMomentumVelocity;
+        bShouldApplyPostVaultVelocity = true;
+
+        bVaulting = false;
+        SetMovementMode(MOVE_Walking);
+        if (CharacterOwner->GetCapsuleComponent())
+        {
+            CharacterOwner->GetCapsuleComponent()->SetCollisionEnabled(ECollisionEnabled::QueryAndPhysics);
+        }
+
+        return;
+    }
+
+    // Get relative vault offset from curve
+    FVector LocalOffset = VaultCurve->GetVectorValue(Time);
+
+    // Build world-space offset using vault direction as X
+    FVector Right = FVector::CrossProduct(FVector::UpVector, VaultDirection);
+    FVector Up = FVector::UpVector;
+
+    FVector WorldOffset =
+        VaultDirection * (LocalOffset.X * VaultForwardDistance) +
+        Right * LocalOffset.Y +
+        Up * (LocalOffset.Z * VaultHeight + 50.f);
+
+    FVector NewLocation = VaultStart + WorldOffset;
+
+    // Move character
+    FHitResult Hit;
+    SafeMoveUpdatedComponent(NewLocation - CharacterOwner->GetActorLocation(), CharacterOwner->GetActorRotation(), true, Hit);
+
 }

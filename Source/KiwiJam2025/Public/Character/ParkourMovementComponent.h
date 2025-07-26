@@ -8,6 +8,7 @@
 
 #include "ParkourMovementComponent.generated.h"
 
+
 UENUM()
 enum class EClimbPhase : uint8
 {
@@ -37,9 +38,13 @@ public:
 
     UParkourMovementComponent();
 
+    virtual void TickComponent(float DeltaTime, enum ELevelTick TickType, FActorComponentTickFunction* ThisTickFunction) override;
+
     virtual void PhysCustom(float deltaTime, int32 Iterations) override;
 
     void BeginClimb(const FClimbableSurfaceResult& Surface);
+
+    void BeginVault(const FClimbableSurfaceResult& Surface);
 
 protected:
     void PhysClimb(float deltaTime, int32 Iterations);
@@ -62,7 +67,7 @@ private:
     bool bClimbActive = false;
 
     float ClimbStartPitch = 0.f;
-    float ClimbTargetPitch = 45.f; // Look upward slightly
+
 
     EClimbPhase ClimbPhase = EClimbPhase::None;
 
@@ -79,4 +84,51 @@ private:
 
     UPROPERTY(EditAnywhere, Category = "Parkour|Climb")
     float PullUpTime = 0.5f;
+
+    UPROPERTY(EditAnywhere, Category = "Parkour|Climb")
+    float ClimbTargetPitch = 20.f; // Look upward slightly
+
+    // Configurable asset
+    UPROPERTY(EditAnywhere, Category = "Parkour|Vault")
+    UCurveVector* VaultCurve;
+
+    // Configurable asset
+    UPROPERTY(EditAnywhere, Category = "Parkour|Vault")
+    float VaultTime = 0.8f;
+
+    // Configurable asset
+    UPROPERTY(EditAnywhere, Category = "Parkour|Vault")
+    float VaultForwardDistance = 100.0f;
+
+    // Configurable asset
+    UPROPERTY(EditAnywhere, Category = "Parkour|Vault")
+    float MaxVaultMomentumSpeed = 600.f;
+
+
+
+    // Curve for climb progress
+    UPROPERTY(EditAnywhere, Category = "Parkour|Vault")
+    UCurveFloat* VaultCameraTiltCurve = nullptr;
+
+    // Configurable asset
+    UPROPERTY(EditAnywhere, Category = "Parkour|Vault")
+    float MaxCameraTilt = 15.f;
+
+    // Internal state
+    FVector VaultStart;
+    FVector VaultTarget;
+    FVector VaultDirection;
+    FVector VaultMomentum;
+    FVector VaultMomentumVelocity;
+    float VaultHeight = 0.f;
+    float VaultElapsed = 0.f;
+    float VaultDuration = 0.f;
+    bool bVaulting = false;
+
+    FVector PendingPostVaultVelocity = FVector::ZeroVector;
+    bool bShouldApplyPostVaultVelocity = false;
+
+    FRotator CameraTiltTarget;
+    float CurrentVaultTilt;
+    float CameraTiltInterpSpeed = 6.0f;
 };

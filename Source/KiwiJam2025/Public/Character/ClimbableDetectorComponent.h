@@ -6,6 +6,7 @@
 #include "Components/ActorComponent.h"
 #include "ClimbableDetectorComponent.generated.h"
 
+
 UENUM(BlueprintType)
 enum class EClimbableSurfaceType : uint8
 {
@@ -43,6 +44,9 @@ struct FClimbableSurfaceResult
 
 	UPROPERTY(BlueprintReadOnly)
 	AActor* HitActor = nullptr;
+
+	UPROPERTY(BlueprintReadOnly)
+	bool bHeadBlocked = false;
 };
 
 //class ACharacter;
@@ -60,17 +64,22 @@ public:
 
 	bool DetectClimbableSurface(FClimbableSurfaceResult& OutResult);
 
+	bool CheckVaultSurface(FClimbableSurfaceResult& OutInfo);
+
 protected:
-	UPROPERTY(EditAnywhere)
+	UPROPERTY(EditAnywhere, Category = "Climb")
 	float ForwardTraceDistance = 150.f;
 
-	UPROPERTY(EditAnywhere)
+	UPROPERTY(EditAnywhere, Category = "Climb")
 	float VerticalTraceHeight = 100.f;
 
-	UPROPERTY(EditAnywhere)
+	UPROPERTY(EditAnywhere, Category = "Climb")
+	float UpTraceHeight = 100.f;
+
+	UPROPERTY(EditAnywhere, Category = "Climb")
 	float MinLedgeHeight = 40.f;
 
-	UPROPERTY(EditAnywhere)
+	UPROPERTY(EditAnywhere, Category = "Climb")
 	float MaxLedgeHeight = 140.f;
 
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Debug")
@@ -81,6 +90,18 @@ protected:
 
 	TObjectPtr<ACharacter> OwnerCharacter;
 
+	UPROPERTY(EditAnywhere, Category = "Vault")
+	float VaultForwardTraceDistance = 150.f;
+
+	UPROPERTY(EditAnywhere, Category = "Vault")
+	float VaultObstacleHeightMin = 40.f;
+
+	UPROPERTY(EditAnywhere, Category = "Vault")
+	float VaultObstacleHeightMax = 100.f;
+
+	UPROPERTY(EditAnywhere, Category = "Vault")
+	float VaultObstacleDistance = 100.f;
+
 public:
 	// Called when the game starts
 	virtual void BeginPlay() override;
@@ -88,6 +109,7 @@ public:
 private:
 	bool TraceForward(FHitResult& OutHit);
 	bool TraceLedgeTop(const FVector& ForwardHitLocation, FVector& OutLedgeLocation);
+	bool TraceHead(FHitResult& OutHit);
 
 	void DrawDebugBoxAtPoint(UWorld* World, const FVector& Point, const FColor& Color, float Size = 10.f);
 

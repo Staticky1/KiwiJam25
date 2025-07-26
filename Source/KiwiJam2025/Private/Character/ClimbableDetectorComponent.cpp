@@ -26,6 +26,19 @@ bool UClimbableDetectorComponent::DetectClimbableSurface(FClimbableSurfaceResult
 {
     if (!OwnerCharacter) return false;
 
+    //check head space
+    FHitResult HeadHit;
+    if (TraceHead(HeadHit))
+    {
+        // Optional debug
+        if (bDebugDraw)
+        {
+            FVector Start = OwnerCharacter->GetActorLocation() + FVector(0, 0, VerticalTraceHeight * 0.5f);
+            FVector End = Start + OwnerCharacter->GetActorUpVector() * UpTraceHeight;
+            DrawDebugLine(GetWorld(), Start, End, FColor::Red, false, 1.0f, 0, 2.f);
+        }
+        return false;
+    }
 
     FHitResult ForwardHit;
     if (!TraceForward(ForwardHit))
@@ -62,7 +75,7 @@ bool UClimbableDetectorComponent::DetectClimbableSurface(FClimbableSurfaceResult
     OutResult.SurfaceForward = -ForwardHit.ImpactNormal;
     OutResult.HitActor = ForwardHit.GetActor();
     OutResult.SurfaceHeight = SurfaceHeight;
-    OutResult.SurfaceType = EClimbableSurfaceType::Ledge; // We'll classify more later
+    OutResult.SurfaceType = EClimbableSurfaceType::Ledge; // classify more later
 
     // Debug visualization 
     if (bDebugDraw) 
@@ -85,6 +98,68 @@ bool UClimbableDetectorComponent::DetectClimbableSurface(FClimbableSurfaceResult
             nullptr, FColor::White, 2.f, false);
     }
 
+    return true;
+}
+
+bool UClimbableDetectorComponent::CheckVaultSurface(FClimbableSurfaceResult& OutInfo)
+{
+    if (!OwnerCharacter) return false;
+
+    FVector Start = OwnerCharacter->GetActorLocation();
+    FVector Forward = OwnerCharacter->GetActorForwardVector();
+    FVector End = Start + Forward * VaultForwardTraceDistance; // Short forward check
+
+    // 1. Forward trace to detect obstacle
+    FHitResult Hit;
+    FCollisionQueryParams Params;
+    Params.AddIgnoredActor(OwnerCharacter);
+    if (bDebugDraw)
+        DrawDebugLine(GetWorld(), Start, End, FColor::Yellow, false, 2.0f); 
+    if (!GetWorld()->LineTraceSingleByChannel(Hit, Start, End, TraceChannel, Params))
+    {
+        return false;
+    }
+
+    if (bDebugDraw)
+    DrawDebugSphere(GetWorld(), Hit.ImpactPoint, 15.f, 12, FColor::Cyan, false, 2.f);
+
+    float ObstacleTopZ = Hit.ImpactPoint.Z + Hit.Component->Bounds.BoxExtent.Z;
+    float PlayerFeetZ = OwnerCharacter->GetActorLocation().Z;
+
+    float ObstacleHeight = ObstacleTopZ - PlayerFeetZ;
+
+    // 2. Height check
+    if (ObstacleHeight < VaultObstacleHeightMin || ObstacleHeight > VaultObstacleHeightMax)
+        return false;
+
+    // 3. Check for landing spot beyond the obstacle
+    FVector VaultCheckStart = Hit.ImpactPoint + Forward * VaultObstacleDistance + FVector(0,0,50);
+    FVector VaultCheckEnd = VaultCheckStart - FVector(0, 0, 120);
+    if (bDebugDraw)
+        DrawDebugLine(GetWorld(), VaultCheckStart, VaultCheckEnd, FColor::Yellow, false, 2.0f);
+    FHitResult VaultLandingHit;
+    if (GetWorld()->LineTraceSingleByChannel(VaultLandingHit, VaultCheckStart, VaultCheckEnd, TraceChannel, Params))
+    {
+        if (bDebugDraw)
+            DrawDebugSphere(GetWorld(), VaultLandingHit.ImpactPoint, 15.f, 12, FColor::Cyan, false, 5.f);
+        return false;
+    }
+
+    OutInfo.bIsValid = true;
+    OutInfo.ImpactPoint = Hit.ImpactPoint;
+    OutInfo.ImpactNormal = Hit.ImpactNormal;
+    OutInfo.SurfaceForward = -Hit.ImpactNormal;
+    OutInfo.HitActor = Hit.GetActor();
+    OutInfo.SurfaceHeight = ObstacleHeight;
+    OutInfo.SurfaceType = EClimbableSurfaceType::Vaultable; // We'll classify more later
+
+    if (bDebugDraw)
+    {
+        DrawDebugLine(GetWorld(), Start, End, FColor::Yellow, false, 2.0f);
+        DrawDebugBox(GetWorld(), Hit.ImpactPoint, FVector(10, 10, 10), FColor::Red, false, 2.0f);
+        DrawDebugBox(GetWorld(), VaultLandingHit.ImpactPoint, FVector(10, 10, 10), FColor::Green, false, 2.0f);
+    }
+  
     return true;
 }
 
@@ -112,6 +187,22 @@ bool UClimbableDetectorComponent::TraceForward(FHitResult& OutHit)
     Params.AddIgnoredActor(OwnerCharacter); 
 
     return GetWorld()->LineTraceSingleByChannel(OutHit, Start, End, TraceChannel, Params); 
+}
+
+bool UClimbableDetectorComponent::TraceHead(FHitResult& OutHit)
+{
+    FVector Start = OwnerCharacter->GetActorLocation() + FVector(0, 0, VerticalTraceHeight * 0.5f);
+    FVector End = Start + OwnerCharacter->GetActorUpVector() * UpTraceHeight;
+
+    if (bDebugDraw)
+    {
+        DrawDebugLine(GetWorld(), Start, End, FColor::Green, false, 2.f, 0, 2.f);
+    }
+
+    FCollisionQueryParams Params;
+    Params.AddIgnoredActor(OwnerCharacter);
+
+    return GetWorld()->LineTraceSingleByChannel(OutHit, Start, End, TraceChannel, Params);
 }
 
 bool UClimbableDetectorComponent::TraceLedgeTop(const FVector& ForwardHitLocation, FVector& OutLedgeLocation)

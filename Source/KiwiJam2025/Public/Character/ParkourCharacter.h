@@ -16,6 +16,8 @@ class UCameraComponent;
 class UInputAction;
 class UInputMappingContext;
 struct FInputActionValue;
+class UWorldMapWidget;
+class UUserWidget;
 
 DECLARE_LOG_CATEGORY_EXTERN(LogParkourCharacter, Log, All);
 
@@ -53,9 +55,25 @@ private:
 	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = Input, meta = (AllowPrivateAccess = "true"))
 	class UInputAction* LookAction;
 
+	/** Map Input Action */
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = Input, meta = (AllowPrivateAccess = "true"))
+	UInputAction* MapAction;
+
+	// Reference to the world map widget class (set in Blueprint)
+	UPROPERTY(EditAnywhere, Category = "UI")
+	TSubclassOf<UWorldMapWidget> WorldMapWidgetClass;
+
+	// Instance of the widget
+	UPROPERTY()
+	UWorldMapWidget* WorldMapWidget;
+
+	bool bMapOpen = false;
+
 	/** Climb detection comp */
 	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = Input, meta = (AllowPrivateAccess = "true"))
 	TObjectPtr<UClimbableDetectorComponent> ClimbableDetectorComponent;
+
+	FRotator AdditionalCameraRotation;
 
 protected:
 	// Called when the game starts or when spawned
@@ -70,6 +88,10 @@ protected:
 
 	void BeginJump(const FInputActionValue& Value);
 
+	void SetCameraRotation();
+
+	void ToggleMap(const FInputActionValue& Value);
+
 public:	
 	// Called every frame
 	virtual void Tick(float DeltaTime) override;
@@ -80,9 +102,12 @@ public:
 	virtual void SetupPlayerInputComponent(class UInputComponent* PlayerInputComponent) override;
 	// End APawn interface
 
+	void AddCameraRotation(FRotator Rotation);
+
 		/** Returns Mesh1P subobject **/
 	USkeletalMeshComponent* GetMesh1P() const { return Mesh1P; }
 	/** Returns FirstPersonCameraComponent subobject **/
 	UCameraComponent* GetFirstPersonCameraComponent() const { return FirstPersonCameraComponent; }
 
+	UWorldMapWidget* GetWorldMapWidget();
 };
